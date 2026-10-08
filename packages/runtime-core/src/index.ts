@@ -482,3 +482,10 @@ export const compatUtils = (
 export const DeprecationTypes = (
   __COMPAT__ ? _DeprecationTypes : null
 ) as typeof _DeprecationTypes
+export {
+  contextManager,
+  setContextManager,
+  type ContextManager,
+} from './context'
+/** @internal */
+export { runWithContext } from './context'

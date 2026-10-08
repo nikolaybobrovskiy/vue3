@@ -2,6 +2,7 @@ import { ShapeFlags, extend } from '@vue/shared'
 import type { ComponentInternalInstance, ComponentOptions } from '../component'
 import { createAppContext } from '../apiCreateApp'
 import { ErrorCodes, callWithErrorHandling } from '../errorHandling'
+import { runWithContext } from '../context'
 import type { VNode } from '../vnode'
 import { popWarningContext, pushWarningContext } from '../warning'
 import {
@@ -83,11 +84,13 @@ export function compatModelEmit(
   const props = instance.vnode.props
   const modelHandler = props && props[compatModelEventPrefix + event]
   if (modelHandler) {
-    callWithErrorHandling(
-      modelHandler,
-      instance,
-      ErrorCodes.COMPONENT_EVENT_HANDLER,
-      args,
+    runWithContext(undefined, () =>
+      callWithErrorHandling(
+        modelHandler,
+        instance,
+        ErrorCodes.COMPONENT_EVENT_HANDLER,
+        args,
+      ),
     )
   }
 }

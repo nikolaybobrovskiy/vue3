@@ -1,4 +1,5 @@
 import { ErrorCodes, callWithErrorHandling, handleError } from './errorHandling'
+import { contextManager, runWithContext } from './context'
 import { NOOP, isArray } from '@vue/shared'
 import { type ComponentInternalInstance, getComponentName } from './component'
 
@@ -63,7 +64,10 @@ export function nextTick<T, R>(
   fn?: (this: T) => R | Promise<R>,
 ): Promise<void | R> {
   const p = currentFlushPromise || resolvedPromise
-  return fn ? p.then(this ? fn.bind(this) : fn) : p
+  if (!fn) return p
+  const context =
+    contextManager.getContext() || (this && (this as any)._capturedContext)
+  return p.then(() => runWithContext(context, () => fn.call(this)))
 }
 
 // Use binary-search to find a suitable position in the queue. The queue needs
@@ -118,7 +122,10 @@ export function queueJob(job: SchedulerJob): void {
 
 function queueFlush() {
   if (!currentFlushPromise) {
-    currentFlushPromise = resolvedPromise.then(flushJobs)
+    const context = contextManager.getContext()
+    currentFlushPromise = resolvedPromise.then(() =>
+      runWithContext(context, flushJobs),
+    )
   }
 }
 

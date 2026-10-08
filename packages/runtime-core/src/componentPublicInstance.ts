@@ -320,6 +320,7 @@ export type ComponentPublicInstance<
   $options: Options & MergedComponentOptionsOverride
   $forceUpdate: () => void
   $nextTick: typeof nextTick
+  _capturedContext: any
   $watch<T extends string | ((...args: any) => any)>(
     source: T,
     cb: T extends (...args: any) => infer R
@@ -402,6 +403,7 @@ export const publicPropertiesMap: PublicPropertiesMap =
   // Move PURE marker to new line to workaround compiler discarding it
   // due to type annotation
   /*@__PURE__*/ extend(Object.create(null), {
+    _capturedContext: i => i._capturedContext,
     $: i => i,
     $el: i => (__DEV__ ? getDevRootFragmentEl(i) : i.vnode.el),
     $data: i => i.data,

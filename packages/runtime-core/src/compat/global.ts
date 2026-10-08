@@ -58,6 +58,11 @@ import {
   warnDeprecation,
 } from './compatConfig'
 import type { LegacyPublicInstance } from './instance'
+import {
+  type ContextManager,
+  contextManager,
+  setContextManager,
+} from '../context'
 
 /**
  * @deprecated the default `Vue` export has been removed in Vue 3. The type for
@@ -66,6 +71,7 @@ import type { LegacyPublicInstance } from './instance'
  */
 export type CompatVue = Pick<App, 'version' | 'component' | 'directive'> & {
   configureCompat: typeof configureCompat
+  contextManager: ContextManager
 
   // no inference here since these types are not meant for actual use - they
   // are merely here to provide type checks for internal implementation and
@@ -179,6 +185,11 @@ export function createCompatVue(
   }
 
   Vue.version = `2.6.14-compat:${__VERSION__}`
+  Object.defineProperty(Vue, 'contextManager', {
+    enumerable: true,
+    get: () => contextManager,
+    set: setContextManager,
+  })
   Vue.config = singletonApp.config
 
   Vue.use = (plugin: Plugin, ...options: any[]) => {

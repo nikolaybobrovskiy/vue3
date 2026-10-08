@@ -1,3 +1,4 @@
+import { runWithContext } from './context'
 import {
   Comment,
   Fragment,
@@ -37,6 +38,7 @@ import {
   getGlobalThis,
   invokeArrayFns,
   isArray,
+  isOn,
   isReservedProp,
 } from '@vue/shared'
 import {
@@ -121,6 +123,7 @@ export interface RendererOptions<
     nextValue: any,
     namespace?: ElementNamespace,
     parentComponent?: ComponentInternalInstance | null,
+    listenerOwner?: ComponentInternalInstance | null,
   ): void
   insert(el: HostNode, parent: HostElement, anchor?: HostNode | null): void
   remove(el: HostNode): void
@@ -711,7 +714,15 @@ function baseCreateRenderer(
     if (props) {
       for (const key in props) {
         if (key !== 'value' && !isReservedProp(key)) {
-          hostPatchProp(el, key, null, props[key], namespace, parentComponent)
+          hostPatchProp(
+            el,
+            key,
+            null,
+            props[key],
+            namespace,
+            parentComponent,
+            vnode.ctx,
+          )
         }
       }
       /**
@@ -868,6 +879,25 @@ function baseCreateRenderer(
     }
     parentComponent && toggleRecurse(parentComponent, true)
 
+    // A reused element can move between VNode creators without changing its
+    // handlers (including compiler-cached handlers and identical props objects).
+    // Refresh only listener ownership; other host props keep their patch owner.
+    if (n1.ctx !== n2.ctx) {
+      for (const key in newProps) {
+        if (isOn(key) && !isReservedProp(key)) {
+          hostPatchProp(
+            el,
+            key,
+            oldProps[key],
+            newProps[key],
+            namespace,
+            parentComponent,
+            n2.ctx,
+          )
+        }
+      }
+    }
+
     if (
       // HMR updated, force full diff
       (__DEV__ && isHmrUpdating) ||
@@ -927,7 +957,7 @@ function baseCreateRenderer(
       // (i.e. at the exact same position in the source template)
       if (patchFlag & PatchFlags.FULL_PROPS) {
         // element props contain dynamic keys, full diff needed
-        patchProps(el, oldProps, newProps, parentComponent, namespace)
+        patchProps(el, oldProps, newProps, parentComponent, namespace, n2.ctx)
       } else {
         // class
         // this flag is matched when the element has dynamic class bindings.
@@ -958,7 +988,15 @@ function baseCreateRenderer(
             const next = newProps[key]
             // #1471 force patch value
             if (next !== prev || key === 'value') {
-              hostPatchProp(el, key, prev, next, namespace, parentComponent)
+              hostPatchProp(
+                el,
+                key,
+                prev,
+                next,
+                namespace,
+                parentComponent,
+                n2.ctx,
+              )
             }
           }
         }
@@ -973,7 +1011,7 @@ function baseCreateRenderer(
       }
     } else if (!optimized && dynamicChildren == null) {
       // unoptimized, full diff
-      patchProps(el, oldProps, newProps, parentComponent, namespace)
+      patchProps(el, oldProps, newProps, parentComponent, namespace, n2.ctx)
     }
 
     if ((vnodeHook = newProps.onVnodeUpdated) || dirs) {
@@ -1035,6 +1073,7 @@ function baseCreateRenderer(
     newProps: Data,
     parentComponent: ComponentInternalInstance | null,
     namespace: ElementNamespace,
+    listenerOwner: ComponentInternalInstance | null,
   ) => {
     if (oldProps !== newProps) {
       if (oldProps !== EMPTY_OBJ) {
@@ -1047,6 +1086,7 @@ function baseCreateRenderer(
               null,
               namespace,
               parentComponent,
+              listenerOwner,
             )
           }
         }
@@ -1058,7 +1098,15 @@ function baseCreateRenderer(
         const prev = oldProps[key]
         // defer patching value
         if (next !== prev && key !== 'value') {
-          hostPatchProp(el, key, prev, next, namespace, parentComponent)
+          hostPatchProp(
+            el,
+            key,
+            prev,
+            next,
+            namespace,
+            parentComponent,
+            listenerOwner,
+          )
         }
       }
       if ('value' in newProps) {
@@ -1364,7 +1412,7 @@ function baseCreateRenderer(
 
         if (el && hydrateNode) {
           // vnode has adopted host node - perform hydration instead of mount.
-          const hydrateSubTree = () => {
+          const hydrateSubTreeInContext = () => {
             if (__DEV__) {
               startMeasure(instance, `render`)
             }
@@ -1386,6 +1434,8 @@ function baseCreateRenderer(
               endMeasure(instance, `hydrate`)
             }
           }
+          const hydrateSubTree = () =>
+            runWithContext(instance._capturedContext, hydrateSubTreeInContext)
 
           if (
             isAsyncWrapperVNode &&
@@ -1611,7 +1661,9 @@ function baseCreateRenderer(
 
     // create reactive effect for rendering
     instance.scope.on()
-    const effect = (instance.effect = new ReactiveEffect(componentUpdateFn))
+    const effect = (instance.effect = new ReactiveEffect(() =>
+      runWithContext(instance._capturedContext, componentUpdateFn),
+    ))
     instance.scope.off()
 
     const update = (instance.update = effect.run.bind(effect))

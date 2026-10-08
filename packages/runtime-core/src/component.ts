@@ -1,4 +1,5 @@
 import { type VNode, type VNodeChild, isVNode } from './vnode'
+import { contextManager, runWithContext } from './context'
 import {
   EffectScope,
   type ReactiveEffect,
@@ -324,6 +325,7 @@ export type InternalRenderFunction = {
  * useful for advanced external libraries and tools.
  */
 export interface ComponentInternalInstance {
+  _capturedContext: any
   uid: number
   type: ConcreteComponent
   parent: ComponentInternalInstance | null
@@ -622,6 +624,8 @@ export function createComponentInstance(
     (parent ? parent.appContext : vnode.appContext) || emptyAppContext
 
   const instance: ComponentInternalInstance = {
+    _capturedContext:
+      (vnode.props && vnode.props.ctx) || contextManager.getContext(),
     uid: uid++,
     vnode,
     type,
@@ -705,6 +709,18 @@ export function createComponentInstance(
     instance.ctx = { _: instance }
   }
   instance.root = parent ? parent.root : instance
+  if (instance._capturedContext) {
+    const name =
+      __FEATURE_OPTIONS_API__ && vnode.shapeFlag & ShapeFlags.STATEFUL_COMPONENT
+        ? resolveMergedOptions(instance).name
+        : type.name
+    if (name) {
+      instance._capturedContext = instance._capturedContext.createWithValue(
+        'VueComponent',
+        name,
+      )
+    }
+  }
   instance.emit = emit.bind(null, instance)
 
   // apply custom element special handling
@@ -810,6 +826,16 @@ export function setupComponent(
   instance: ComponentInternalInstance,
   isSSR = false,
   optimized = false,
+): Promise<void> | undefined {
+  return runWithContext(instance._capturedContext, () =>
+    setupComponentInContext(instance, isSSR, optimized),
+  )
+}
+
+function setupComponentInContext(
+  instance: ComponentInternalInstance,
+  isSSR: boolean,
+  optimized: boolean,
 ): Promise<void> | undefined {
   isSSR && setInSSRSetupState(isSSR)
 
@@ -996,6 +1022,16 @@ export function registerRuntimeCompiler(_compile: any): void {
 export const isRuntimeOnly = (): boolean => !compile
 
 export function finishComponentSetup(
+  instance: ComponentInternalInstance,
+  isSSR: boolean,
+  skipOptions?: boolean,
+): void {
+  runWithContext(instance._capturedContext, () =>
+    finishComponentSetupInContext(instance, isSSR, skipOptions),
+  )
+}
+
+function finishComponentSetupInContext(
   instance: ComponentInternalInstance,
   isSSR: boolean,
   skipOptions?: boolean,

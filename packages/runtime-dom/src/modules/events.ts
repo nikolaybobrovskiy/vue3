@@ -3,11 +3,13 @@ import {
   type ComponentInternalInstance,
   ErrorCodes,
   callWithAsyncErrorHandling,
+  runWithContext,
   warn,
 } from '@vue/runtime-core'
 
 interface Invoker extends EventListener {
   value: EventValue
+  owner: ComponentInternalInstance | null
   attached: number
 }
 
@@ -39,12 +41,14 @@ export function patchEvent(
   prevValue: EventValue | null,
   nextValue: EventValue | unknown,
   instance: ComponentInternalInstance | null = null,
+  listenerOwner: ComponentInternalInstance | null = instance,
 ): void {
   // vei = vue event invokers
   const invokers = el[veiKey] || (el[veiKey] = {})
   const existingInvoker = invokers[rawName]
   if (nextValue && existingInvoker) {
     // patch
+    existingInvoker.owner = listenerOwner || instance
     existingInvoker.value = __DEV__
       ? sanitizeEventValue(nextValue, rawName)
       : (nextValue as EventValue)
@@ -57,6 +61,7 @@ export function patchEvent(
           ? sanitizeEventValue(nextValue, rawName)
           : (nextValue as EventValue),
         instance,
+        listenerOwner || instance,
       ))
       addEventListener(el, name, invoker, options)
     } else if (existingInvoker) {
@@ -95,6 +100,7 @@ const getNow = () =>
 function createInvoker(
   initialValue: EventValue,
   instance: ComponentInternalInstance | null,
+  owner: ComponentInternalInstance | null,
 ) {
   const invoker: Invoker = (e: Event & { _vts?: number }) => {
     // async edge case vuejs/vue#6566
@@ -114,39 +120,45 @@ function createInvoker(
     } else if (e._vts <= invoker.attached) {
       return
     }
-    const value = invoker.value
-    if (isArray(value)) {
-      const originalStop = e.stopImmediatePropagation
-      e.stopImmediatePropagation = () => {
-        originalStop.call(e)
-        ;(e as any)._stopped = true
-      }
-      const handlers = value.slice()
-      const args = [e]
-      for (let i = 0; i < handlers.length; i++) {
-        if ((e as any)._stopped) {
-          break
-        }
-        const handler = handlers[i]
-        if (handler) {
+    return runWithContext(
+      invoker.owner && invoker.owner._capturedContext,
+      () => {
+        const value = invoker.value
+        if (isArray(value)) {
+          const originalStop = e.stopImmediatePropagation
+          e.stopImmediatePropagation = () => {
+            originalStop.call(e)
+            ;(e as any)._stopped = true
+          }
+          const handlers = value.slice()
+          const args = [e]
+          for (let i = 0; i < handlers.length; i++) {
+            if ((e as any)._stopped) {
+              break
+            }
+            const handler = handlers[i]
+            if (handler) {
+              callWithAsyncErrorHandling(
+                handler,
+                instance,
+                ErrorCodes.NATIVE_EVENT_HANDLER,
+                args,
+              )
+            }
+          }
+        } else {
           callWithAsyncErrorHandling(
-            handler,
+            value,
             instance,
             ErrorCodes.NATIVE_EVENT_HANDLER,
-            args,
+            [e],
           )
         }
-      }
-    } else {
-      callWithAsyncErrorHandling(
-        value,
-        instance,
-        ErrorCodes.NATIVE_EVENT_HANDLER,
-        [e],
-      )
-    }
+      },
+    )
   }
   invoker.value = initialValue
+  invoker.owner = owner
   invoker.attached = getNow()
   return invoker
 }

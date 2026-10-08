@@ -4,6 +4,7 @@ import {
   type ObjectDirective,
   type VNode,
   nextTick,
+  runWithContext,
   warn,
 } from '@vue/runtime-core'
 import { addEventListener } from '../modules/events'
@@ -18,7 +19,16 @@ import {
 
 type AssignerFn = (value: any) => void
 
-const getModelAssigner = (vnode: VNode): AssignerFn => {
+const getModelAssigner = (
+  vnode: VNode,
+  el: ModelElement,
+  instance: DirectiveBinding['instance'],
+): AssignerFn => {
+  // Prefer the VNode creator (e.g. slot content). Pre-created VNodes instead
+  // belong to the component that attached their model directive.
+  el[ownerKey] = vnode.ctx
+    ? vnode.ctx._capturedContext
+    : instance && instance._capturedContext
   const fn =
     vnode.props!['onUpdate:modelValue'] ||
     (__COMPAT__ && vnode.props!['onModelCompat:input'])
@@ -39,10 +49,26 @@ function onCompositionEnd(e: Event) {
 
 const assignKey: unique symbol = Symbol('_assign')
 const initialValueKey: unique symbol = Symbol('_initialValue')
+const ownerKey: unique symbol = Symbol('_modelOwner')
+
+type ModelElement = Element & { [ownerKey]?: any }
+
+// Native model listeners bypass patchEvent. Scope their DOM entry, not the
+// assigner itself: component model handlers must keep component-event semantics.
+function addModelListener(
+  el: ModelElement,
+  event: string,
+  handler: EventListener,
+) {
+  addEventListener(el, event, e =>
+    runWithContext(el[ownerKey], () => handler(e)),
+  )
+}
 
 type ModelDirective<T, Modifiers extends string = string> = ObjectDirective<
   T & {
     [assignKey]: AssignerFn
+    [ownerKey]?: any
     [initialValueKey]?: string
     _pendingValue?: [multiple: boolean, value: any]
   },
@@ -62,7 +88,7 @@ export const vModelText: ModelDirective<
   HTMLInputElement | HTMLTextAreaElement,
   'trim' | 'number' | 'lazy'
 > = {
-  created(el, { modifiers: { lazy, trim, number } }, vnode) {
+  created(el, { instance, modifiers: { lazy, trim, number } }, vnode) {
     // During hydration, created runs on an element already in the DOM.
     if (el.parentNode) {
       if (el.type === 'text') {
@@ -73,26 +99,26 @@ export const vModelText: ModelDirective<
         el[initialValueKey] = el.defaultValue.replace(/\r\n?/g, '\n')
       }
     }
-    el[assignKey] = getModelAssigner(vnode)
+    el[assignKey] = getModelAssigner(vnode, el, instance)
     const castToNumber =
       number || (vnode.props && vnode.props.type === 'number')
-    addEventListener(el, lazy ? 'change' : 'input', e => {
+    addModelListener(el, lazy ? 'change' : 'input', e => {
       if ((e.target as any).composing) return
       el[assignKey](castValue(el.value, trim, castToNumber))
     })
     if (trim || castToNumber) {
-      addEventListener(el, 'change', () => {
+      addModelListener(el, 'change', () => {
         el.value = castValue(el.value, trim, castToNumber)
       })
     }
     if (!lazy) {
-      addEventListener(el, 'compositionstart', onCompositionStart)
-      addEventListener(el, 'compositionend', onCompositionEnd)
+      addModelListener(el, 'compositionstart', onCompositionStart)
+      addModelListener(el, 'compositionend', onCompositionEnd)
       // Safari < 10.2 & UIWebView doesn't fire compositionend when
       // switching focus before confirming composition choice
       // this also fixes the issue where some browsers e.g. iOS Chrome
       // fires "change" instead of "input" on autocomplete.
-      addEventListener(el, 'change', onCompositionEnd)
+      addModelListener(el, 'change', onCompositionEnd)
     }
   },
   // set value on mounted so it's after min/max for type="range"
@@ -105,17 +131,19 @@ export const vModelText: ModelDirective<
       (el.type === 'text' || el.type === 'textarea') &&
       el.value !== initialValue
     ) {
-      el[assignKey](castValue(el.value, trim, number))
+      runWithContext(el[ownerKey], () =>
+        el[assignKey](castValue(el.value, trim, number)),
+      )
     } else {
       el.value = newValue
     }
   },
   beforeUpdate(
     el,
-    { value, oldValue, modifiers: { lazy, trim, number } },
+    { instance, value, oldValue, modifiers: { lazy, trim, number } },
     vnode,
   ) {
-    el[assignKey] = getModelAssigner(vnode)
+    el[assignKey] = getModelAssigner(vnode, el, instance)
     // avoid clearing unresolved text. #2302
     if ((el as any).composing) return
     const elValue =
@@ -150,9 +178,9 @@ export const vModelText: ModelDirective<
 export const vModelCheckbox: ModelDirective<HTMLInputElement> = {
   // #4096 array checkboxes need to be deep traversed
   deep: true,
-  created(el, _, vnode) {
-    el[assignKey] = getModelAssigner(vnode)
-    addEventListener(el, 'change', () => {
+  created(el, { instance }, vnode) {
+    el[assignKey] = getModelAssigner(vnode, el, instance)
+    addModelListener(el, 'change', () => {
       const modelValue = (el as any)._modelValue
       const elementValue = getValue(el)
       const checked = el.checked
@@ -183,7 +211,7 @@ export const vModelCheckbox: ModelDirective<HTMLInputElement> = {
   // set initial checked on mount to wait for true-value/false-value
   mounted: setChecked,
   beforeUpdate(el, binding, vnode) {
-    el[assignKey] = getModelAssigner(vnode)
+    el[assignKey] = getModelAssigner(vnode, el, binding.instance)
     setChecked(el, binding, vnode)
   },
 }
@@ -214,15 +242,15 @@ function setChecked(
 }
 
 export const vModelRadio: ModelDirective<HTMLInputElement> = {
-  created(el, { value }, vnode) {
+  created(el, { instance, value }, vnode) {
     el.checked = looseEqual(value, vnode.props!.value)
-    el[assignKey] = getModelAssigner(vnode)
-    addEventListener(el, 'change', () => {
+    el[assignKey] = getModelAssigner(vnode, el, instance)
+    addModelListener(el, 'change', () => {
       el[assignKey](getValue(el))
     })
   },
-  beforeUpdate(el, { value, oldValue }, vnode) {
-    el[assignKey] = getModelAssigner(vnode)
+  beforeUpdate(el, { instance, value, oldValue }, vnode) {
+    el[assignKey] = getModelAssigner(vnode, el, instance)
     if (value !== oldValue) {
       el.checked = looseEqual(value, vnode.props!.value)
     }
@@ -232,9 +260,10 @@ export const vModelRadio: ModelDirective<HTMLInputElement> = {
 export const vModelSelect: ModelDirective<HTMLSelectElement, 'number'> = {
   // <select multiple> value need to be deep traversed
   deep: true,
-  created(el, { value, modifiers: { number } }, vnode) {
+  created(el, { instance, value, modifiers: { number } }, vnode) {
     ;(el as any)._modelValue = value
-    addEventListener(el, 'change', () => {
+    addModelListener(el, 'change', () => {
+      const context = el[ownerKey]
       const selectedVal = Array.prototype.filter
         .call(el.options, (o: HTMLOptionElement) => o.selected)
         .map((o: HTMLOptionElement) =>
@@ -259,23 +288,25 @@ export const vModelSelect: ModelDirective<HTMLSelectElement, 'number'> = {
       try {
         el[assignKey](assignedValue)
       } finally {
-        nextTick(() => {
-          if (el._pendingValue === pending) {
-            el._pendingValue = undefined
-          }
-        })
+        nextTick(() =>
+          runWithContext(context, () => {
+            if (el._pendingValue === pending) {
+              el._pendingValue = undefined
+            }
+          }),
+        )
       }
     })
-    el[assignKey] = getModelAssigner(vnode)
+    el[assignKey] = getModelAssigner(vnode, el, instance)
   },
   // set value in mounted & updated because <select> relies on its children
   // <option>s.
   mounted(el, { value }) {
     setSelected(el, value)
   },
-  beforeUpdate(el, { value }, vnode) {
+  beforeUpdate(el, { instance, value }, vnode) {
     ;(el as any)._modelValue = value
-    el[assignKey] = getModelAssigner(vnode)
+    el[assignKey] = getModelAssigner(vnode, el, instance)
   },
   updated(el, { value }) {
     const pending = el._pendingValue

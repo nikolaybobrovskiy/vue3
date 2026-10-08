@@ -29,6 +29,7 @@ export const patchProp: DOMRendererOptions['patchProp'] = (
   nextValue,
   namespace,
   parentComponent,
+  listenerOwner,
 ) => {
   const isSVG = namespace === 'svg'
   if (key === 'class') {
@@ -38,7 +39,7 @@ export const patchProp: DOMRendererOptions['patchProp'] = (
   } else if (isOn(key)) {
     // ignore v-model listeners
     if (!isModelListener(key)) {
-      patchEvent(el, key, prevValue, nextValue, parentComponent)
+      patchEvent(el, key, prevValue, nextValue, parentComponent, listenerOwner)
     }
   } else if (
     key[0] === '.'

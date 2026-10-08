@@ -12,7 +12,6 @@ import {
   vModelDynamic,
   vShow,
 } from '@vue/runtime-dom'
-import { extend } from '@vue/shared'
 
 if (__DEV__) {
   initDev()
@@ -40,6 +39,11 @@ function wrappedCreateApp(...args: any[]) {
 
 export function createCompatVue(): CompatVue {
   const Vue = compatUtils.createCompatVue(createApp, wrappedCreateApp)
-  extend(Vue, runtimeDom)
+  for (const key in runtimeDom) {
+    // Preserve the live accessor: copying this export snapshots the manager.
+    if (key !== 'contextManager') {
+      ;(Vue as any)[key] = (runtimeDom as any)[key]
+    }
+  }
   return Vue
 }

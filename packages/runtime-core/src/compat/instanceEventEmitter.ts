@@ -1,6 +1,7 @@
 import { isArray } from '@vue/shared'
 import type { ComponentInternalInstance } from '../component'
 import { ErrorCodes, callWithAsyncErrorHandling } from '../errorHandling'
+import { runWithContext } from '../context'
 import { DeprecationTypes, assertCompatEnabled } from './compatConfig'
 import type { ComponentPublicInstance } from '../componentPublicInstance'
 
@@ -98,12 +99,19 @@ export function emit(
 ): ComponentPublicInstance | null {
   const cbs = getRegistry(instance)[event]
   if (cbs) {
-    callWithAsyncErrorHandling(
-      cbs.map(cb => cb.bind(instance.proxy)),
-      instance,
-      ErrorCodes.COMPONENT_EVENT_HANDLER,
-      args,
-    )
+    const invoke = () => {
+      callWithAsyncErrorHandling(
+        cbs.map(cb => cb.bind(instance.proxy)),
+        instance,
+        ErrorCodes.COMPONENT_EVENT_HANDLER,
+        args,
+      )
+    }
+    if (event.startsWith('hook:')) {
+      runWithContext(instance._capturedContext, invoke)
+    } else {
+      invoke()
+    }
   }
   return instance.proxy
 }

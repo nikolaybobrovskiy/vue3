@@ -148,7 +148,11 @@ function createConfig(format, output, plugins = []) {
     output.esModule = true
   }
   output.sourcemap = !!process.env.SOURCE_MAP
-  output.externalLiveBindings = false
+  // Native CJS entrypoints re-export the replaceable ambient context manager.
+  // Snapshotting external exports disconnects the public adapter from runtime.
+  output.externalLiveBindings =
+    isCJSBuild &&
+    ['vue', 'runtime-dom', 'server-renderer'].includes(process.env.TARGET)
   // https://github.com/rollup/rollup/pull/5380
   output.reexportProtoFromExternal = false
 

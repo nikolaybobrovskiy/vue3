@@ -542,7 +542,15 @@ export function createHydrationFunctions(
               if (isUnchangedResourceProp(el, key, props[key])) {
                 continue
               }
-              patchProp(el, key, null, props[key], namespace, parentComponent)
+              patchProp(
+                el,
+                key,
+                null,
+                props[key],
+                namespace,
+                parentComponent,
+                vnode.ctx,
+              )
             }
           }
         } else if (props.onClick) {
@@ -555,6 +563,7 @@ export function createHydrationFunctions(
             props.onClick,
             undefined,
             parentComponent,
+            vnode.ctx,
           )
         } else if (patchFlag & PatchFlags.STYLE && isReactive(props.style)) {
           // #11372: object style values are iterated during patch instead of

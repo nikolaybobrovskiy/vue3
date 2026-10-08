@@ -21,6 +21,7 @@ import {
   formatComponentName,
 } from './component'
 import { ErrorCodes, callWithAsyncErrorHandling } from './errorHandling'
+import { runWithContext } from './context'
 import { warn } from './warning'
 import { devtoolsComponentEmit } from './devtools'
 import type { AppContext } from './apiCreateApp'
@@ -204,11 +205,13 @@ export function emit(
   }
 
   if (handler) {
-    callWithAsyncErrorHandling(
-      handler,
-      instance,
-      ErrorCodes.COMPONENT_EVENT_HANDLER,
-      args,
+    runWithContext(undefined, () =>
+      callWithAsyncErrorHandling(
+        handler,
+        instance,
+        ErrorCodes.COMPONENT_EVENT_HANDLER,
+        args,
+      ),
     )
   }
 
@@ -220,11 +223,13 @@ export function emit(
       return
     }
     instance.emitted[handlerName] = true
-    callWithAsyncErrorHandling(
-      onceHandler,
-      instance,
-      ErrorCodes.COMPONENT_EVENT_HANDLER,
-      args,
+    runWithContext(undefined, () =>
+      callWithAsyncErrorHandling(
+        onceHandler,
+        instance,
+        ErrorCodes.COMPONENT_EVENT_HANDLER,
+        args,
+      ),
     )
   }
 

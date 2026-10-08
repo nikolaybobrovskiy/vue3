@@ -13,6 +13,7 @@ import {
   type VNodeProps,
   handleError,
   mergeProps,
+  runWithContext,
   ssrUtils,
   warn,
 } from '@vue/runtime-dom'
@@ -132,6 +133,15 @@ export function renderComponentVNode(
 }
 
 function renderComponentSubTree(
+  instance: ComponentInternalInstance,
+  slotScopeId?: string,
+): SSRBuffer | Promise<SSRBuffer> {
+  return runWithContext(instance._capturedContext, () =>
+    renderComponentSubTreeInContext(instance, slotScopeId),
+  )
+}
+
+function renderComponentSubTreeInContext(
   instance: ComponentInternalInstance,
   slotScopeId?: string,
 ): SSRBuffer | Promise<SSRBuffer> {
